@@ -422,9 +422,18 @@ async def to_code(config):
         # rest of the flow can read it like a local file. Lets a github:// package
         # reference a model by URL without shipping the binary to the config dir.
         _dl_dir = external_files.compute_local_file_dir("meter_reader_tflite")
-        _fname = os.path.basename(_model_source.split("?")[0].replace("\\", "/"))
+        _src_noq = _model_source.split("?")[0]
+        _fname = os.path.basename(_src_noq.replace("\\", "/"))
         _dl_path = _dl_dir / _fname
         external_files.download_content(_model_source, _dl_path)
+        # Also fetch the optional .txt sidecar (model config: channels, output
+        # processing, arena size...) so we don't fall back to filename heuristics.
+        _txt_source = os.path.splitext(_src_noq)[0] + ".txt"
+        _txt_path = _dl_dir / (os.path.splitext(_fname)[0] + ".txt")
+        try:
+            external_files.download_content(_txt_source, _txt_path)
+        except Exception:  # noqa: BLE001 - sidecar is optional
+            pass
         model_path = str(_dl_path)
     else:
         model_path = CORE.relative_config_path(_model_source)
