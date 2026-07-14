@@ -20,6 +20,7 @@ from esphome.const import (
     CONF_UNIT_OF_MEASUREMENT,
 )
 from esphome.core import CORE, HexInt
+from esphome import external_files
 
 try:
     from esphome.components import value_validator
@@ -262,11 +263,18 @@ def infer_model_config_from_filename(model_filename):
     return config
 
 
+def _validate_model_source(value):
+    """Accept either a local file path or an http(s) URL for the model."""
+    if isinstance(value, str) and value.startswith(("http://", "https://")):
+        return value
+    return cv.file_(value)
+
+
 # Use the standard ESPHome sensor configuration pattern
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(MeterReaderTFLite),
-        cv.Required(CONF_MODEL): cv.file_,
+        cv.Required(CONF_MODEL): _validate_model_source,
         cv.Optional(CONF_VALIDATOR): cv.use_id(value_validator.ValueValidator)
         if value_validator
         else cv.invalid(
@@ -408,7 +416,18 @@ async def to_code(config):
         cg.add_define("USE_HOST")
         # On host, we don't set a real camera object.
 
-    model_path = CORE.relative_config_path(config[CONF_MODEL])
+    _model_source = config[CONF_MODEL]
+    if isinstance(_model_source, str) and _model_source.startswith(("http://", "https://")):
+        # Remote model: download it (cached) into the ESPHome data dir so the
+        # rest of the flow can read it like a local file. Lets a github:// package
+        # reference a model by URL without shipping the binary to the config dir.
+        _dl_dir = external_files.compute_local_file_dir("meter_reader_tflite")
+        _fname = os.path.basename(_model_source.split("?")[0].replace("\\", "/"))
+        _dl_path = _dl_dir / _fname
+        external_files.download_content(_model_source, _dl_path)
+        model_path = str(_dl_path)
+    else:
+        model_path = CORE.relative_config_path(_model_source)
     model_filename = os.path.basename(str(model_path).replace("\\", "/"))
     model_type = os.path.splitext(model_filename)[0]  # Remove .tflite extension
 
